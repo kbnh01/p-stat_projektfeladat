@@ -1,0 +1,177 @@
+---
+title: "Beadandó"
+author: "Kornél Bánhegyi"
+date: "2025-01-15"
+output:
+  html_document: default
+  pdf_document: 
+    latex_engine: xelatex
+  word_document: default
+---
+
+# Előszó
+
+Ezt a beadandót R markdown fájlként írom, hogy a beadandó dolgozat replikálható legyen a fájlokkal és a kiegészíés esélye fennálljon. A következő csomagokat használom: readr dplyr knitr tidyr ggplot2 tidyverse ggrepel
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(repos = c(CRAN = "https://cran.r-project.org")) 
+library(readr)
+library(dplyr)
+```
+
+## **Bevezető:**
+
+Ebben a beadandó dolgozatomban Magyarország népességét, illetve népességének változását szeretném megvizsgáni, azzal kapcsolatos okokat, összefüggéseket és esetleges következtetéseket levonni.
+
+## **Adatgyűjtés és rendezés**
+
+Forrásként főleg a KSH adatait használtam.
+
+Források:
+
+[KSH - Népességi adatok területileg](https://www.ksh.hu/stadat_files/nep/hu/nep0034.html "Területoszlás")
+
+[KSH - Korcsoportok régió szerint](https://www.ksh.hu/stadat_files/nep/hu/nep0035.html "Korcsoport")
+
+[KSH - Munkanélküliségi adatok](https://www.ksh.hu/stadat_files/mun/hu/mun0171.html "Munkanélküliség")
+
+Először fontosnak tartom az adatokat beolvasni és szétszedni, hogy területegységileg láthassuk a releváns adatokat.
+
+```{r library(readr), message=FALSE}
+library(dplyr)
+adat1 <- read_delim('stadat-nep0034-22.1.2.1-hu_utf.csv', delim = ";", 
+    escape_double = FALSE, trim_ws = TRUE, show_col_types = FALSE)
+adat_munka <- read_delim('stadat-mun0171-20.2.2.5-hu_utf.csv', delim = ";", 
+    escape_double = FALSE, trim_ws = TRUE, show_col_types = FALSE)
+adat_oreg <- read_delim('stadat-nep0035-22.1.2.2-hu_utf.csv', delim = ";", 
+    escape_double = FALSE, trim_ws = TRUE, show_col_types = FALSE)
+orszag<- adat1 %>%
+  filter(`Területi egység szintje` == "ország")
+```
+
+## Személyes érdeklődés
+
+Ez a téma hazánkban szerintem kifejezetten fontos a társadalmi, gazdasági és politikai döntéshozatal szempontjából. A népesség változása nemcsak az egyének életét befolyásolja, hanem hatással van az ország munkaerőpiacára, gazdasági növekedésére, szociális ellátórendszerére és általános fejlődési kilátásaira is, és szerintem ez a probléma generációkat aggasztja.
+
+Az alábbi ábrán is látható, hogy az elmúlt több, mint 20 évben mennyire láthatóan csökken Magyarország népessége:
+
+```{r ggplot2, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+orszag_plot <- orszag %>%
+  pivot_longer(cols = `2001`:`2024`, names_to = "Year", values_to = "Population")
+
+orszag_plot2 <- orszag_plot %>%
+  mutate(Year = as.numeric(Year),
+         Population = as.numeric(gsub(" ", "", Population)))
+ggplot(orszag_plot2, aes(x = Year, y = Population)) +
+  geom_line(color = "blue", size = 1) +
+  labs(title = "Magyarország népessége",
+       x = "Év",
+       y = "Népesség") +
+  scale_y_continuous(limits = c(9000000, 11000000)) +
+  scale_x_continuous(limits = c(2000, 2027)) + 
+  theme_gray() 
+```
+
+Személyes hipotézisem az, hogy a foglalkoztatottság szoros kapcsolatban áll a népességcsökkenéssel, ezt próbálom meg bizonyítani a későbbiekben. Szemléltetésként a vármegyei népességi adatok táblázatát választottam, ezzel fogom összehasonlítani a munkanélküliségi adatokkal 2011 és 2022 között. Az első táblázat az alap táblázatot szemlélteti, a második a népességkülönbözetet 2011 és 2022 között, vármegyékre bontva.
+
+```{r library(dplyr), echo=TRUE}
+library(dplyr)
+library(knitr)
+varmegye<- adat1 %>%
+  filter(`Területi egység szintje` == "vármegye")
+regio<- adat1 %>%
+  filter(`Területi egység szintje` == "régió")
+nagyregio<- adat1 %>%
+  filter(`Területi egység szintje` == "nagyrégió")
+varmegye_kulonb <- varmegye %>%
+  mutate(
+    `2011` = as.numeric(gsub("[^0-9]", "", `2011`)), 
+    `2022` = as.numeric(gsub("[^0-9]", "", `2022`)),  
+    Difference = `2022` - `2011`
+  ) %>%
+  select(`Területi egység neve`, `Területi egység szintje`, `2011`, `2022`, Difference) %>%
+  arrange(Difference) 
+
+kable(regio)
+kable(varmegye_kulonb)
+```
+
+```{r, message=FALSE, warning=FALSE}
+varmegye_munka <- adat_munka %>%
+  filter(grepl("vármegye", `Területi egység szintje`)) %>% 
+  mutate(
+    Avg_2011 = rowMeans(select(., starts_with("2011")), na.rm = TRUE) / 10  
+  ) %>%
+  select(`Területi egység neve`, `Területi egység szintje`, Avg_2011)
+
+kable(varmegye_munka)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+
+kulonb <- varmegye_kulonb %>%
+  select(`Területi egység neve`, Difference) %>%
+  mutate(Source = "Population Change")
+
+munkat <- varmegye_munka %>%
+  select(`Területi egység neve`, Avg_2011) %>%
+  rename(Difference = Avg_2011) %>%
+  mutate(Source = "Avg Employment")
+osszes1 <- bind_rows(kulonb, munkat)
+
+kulonb2 <- osszes1 %>% filter(Source == "Population Change")
+munka2 <- osszes1 %>% filter(Source == "Avg Employment")
+
+egybe <- merge(kulonb2, munka2, by = "Területi egység neve")
+
+ggplot(egybe, aes(x = Difference.y, y = Difference.x, label = `Területi egység neve`)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  geom_text_repel(size = 3) + 
+  labs(
+    title = "Szórásdiagram a kapcsolatukról",
+    x = "Átlagos munkanélküliség",
+    y = "Népességváltozás"
+  ) +
+  theme_minimal()
+```
+
+A fenti ábrán ábrázoltam a népességváltozást és a munkanélküliséget, már ezen az ábrán is látszik, hogy az elemek nagy része közel fekszik el a vonalhoz.
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+
+kulonb2 <- osszes1 %>% filter(Source == "Population Change")
+munka2 <- osszes1 %>% filter(Source == "Avg Employment")
+
+merged_data <- merge(kulonb2, munka2, by = "Területi egység neve")
+colnames(merged_data) <- c("Területi_egysegek", "Population_Change", "Source1", "Avg_Employment", "Source2")
+correlation <- cor(merged_data$Avg_Employment, merged_data$Population_Change, use = "complete.obs")
+print(paste("Korrelációs érték: ", round(correlation, 2)))
+```
+
+A kapott korrelációs érték −0.56 azt mutatja, hogy mérsékelt negatív kapcsolat áll fenn az átlagos foglalkoztatás és a népességváltozás között. Ez azt jelenti, hogy a magasabb foglalkoztatási szintek általában kisebb (vagy akár pozitív) népességváltozással járnak, míg az alacsonyabb foglalkoztatottságú területeken nagyobb népességcsökkenés figyelhető meg.
+
+Annak ellenére, hogy a korreláció nem feltétlenül jelenti azt, hogy egyértelmű kapcsolat van, ez az eredmény arra utalhat, hogy a jobb foglalkoztatási lehetőségek hozzájárulhatnak a népesség megtartásához, a magas munkanélküliséggel küzdő területekről meg nagyobb elvándorlás jelentkezhet.
+
+```{r message=FALSE, warning=FALSE}
+regression_model <- lm(Population_Change ~ Avg_Employment, data = merged_data)
+summary(regression_model)
+```
+
+A fenti regressziós modell azt mutatja, hogy ahol magasabb az átlagos foglalkoztatottság, ott kisebb a népességcsökkenés. A negatív összefüggés (-242.41) azt jelzi, hogy minden egyes foglalkoztatási egység növekedése átlagosan 242 fővel csökkenti a népességcsökkenést. Bár az összefüggés statisztikailag szignifikáns (p = 0.015), a modell csupán a népességváltozás körülbelül \~32%-át magyarázza, tehát más tényezők is befolyásolják a helyzetet.
+
+## Utószó:
+
+Nyilvánvalóan végső következtetéseket nehéz levonni egy ilyen rövid dolgozat alatt, azonban máris felfedezhető a szoros kapcsolat a tényezők között. A munkanélküliség arra kényszeríti sok esetben az embereket, hogy elvándoroljanak más területekre, legyen az belföld (pl.: pozitív Győr-Moson-Sopron) vagy akár külföld. Sokszor a munkanélküliséggel küzdő vármegyék más problémákkal is küzdhetnek, legyen az oktatás, vagy infrastruktúra szinten.
